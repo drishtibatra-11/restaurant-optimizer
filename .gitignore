@@ -1,0 +1,12 @@
+build/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+.vscode/
+.idea/
+.DS_Store
+results/
+*.log
+data/large/*.csv
