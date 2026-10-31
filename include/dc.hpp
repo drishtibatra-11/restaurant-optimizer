@@ -122,3 +122,70 @@ inline unsigned long long reservationCode(const Reservation& r) {
     unsigned long long x = r.id * 131ULL + r.party * 7ULL + r.start;
     return powMod(x, 65537ULL, 1000000007ULL);
 }
+
+// ---------- Celebrity problem ----------
+// knows[a][b] == true means person a knows person b.
+// A celebrity is known by everyone else and knows nobody. Returns -1 if none.
+using KnowsMatrix = std::vector<std::vector<bool>>;
+
+struct CelebResult {
+    int person;          // index of the celebrity, or -1
+    long long calls;     // how many times knows[][] was read
+};
+
+namespace detail {
+
+// true if c is known by everyone else and knows nobody (counts every read)
+inline bool isCelebrity(const KnowsMatrix& k, int c, long long& calls) {
+    int n = static_cast<int>(k.size());
+    for (int i = 0; i < n; ++i) {
+        if (i == c) continue;
+        calls += 2;
+        if (k[c][i] || !k[i][c]) return false;
+    }
+    return true;
+}
+
+// Divide and conquer on [lo, hi): returns the only possible candidate.
+// T(n) = 2T(n/2) + Theta(1) = Theta(n)
+inline int celebCandidate(const KnowsMatrix& k, int lo, int hi, long long& calls) {
+    if (hi - lo == 1) return lo;
+    int mid = lo + (hi - lo) / 2;
+    int a = celebCandidate(k, lo, mid, calls);
+    int b = celebCandidate(k, mid, hi, calls);
+    ++calls;
+    return k[a][b] ? b : a;      // if a knows b, a is out; otherwise b is out
+}
+
+} // namespace detail
+
+// Brute force, Theta(n^2): test everyone.
+inline CelebResult celebrityBrute(const KnowsMatrix& k) {
+    long long calls = 0;
+    int n = static_cast<int>(k.size());
+    for (int c = 0; c < n; ++c)
+        if (detail::isCelebrity(k, c, calls)) return {c, calls};
+    return {-1, calls};
+}
+
+// Elimination, at most 3(n-1) reads.
+inline CelebResult celebrityElim(const KnowsMatrix& k) {
+    long long calls = 0;
+    int n = static_cast<int>(k.size());
+    if (n == 0) return {-1, 0};
+    int cand = 0;
+    for (int i = 1; i < n; ++i) {
+        ++calls;
+        if (k[cand][i]) cand = i;    // cand knows i, so cand cannot be the celebrity
+    }
+    return {detail::isCelebrity(k, cand, calls) ? cand : -1, calls};
+}
+
+// Divide and conquer candidate search, then one verification pass.
+inline CelebResult celebrityDC(const KnowsMatrix& k) {
+    long long calls = 0;
+    int n = static_cast<int>(k.size());
+    if (n == 0) return {-1, 0};
+    int cand = detail::celebCandidate(k, 0, n, calls);
+    return {detail::isCelebrity(k, cand, calls) ? cand : -1, calls};
+}
