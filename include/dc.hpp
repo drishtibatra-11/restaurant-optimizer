@@ -189,3 +189,113 @@ inline CelebResult celebrityDC(const KnowsMatrix& k) {
     int cand = detail::celebCandidate(k, 0, n, calls);
     return {detail::isCelebrity(k, cand, calls) ? cand : -1, calls};
 }
+
+// ---------- Matrix multiplication: classical vs Strassen ----------
+#include <algorithm>
+
+struct Matrix {
+    int rows, cols;
+    std::vector<long long> a;
+    Matrix(int r = 0, int c = 0)
+        : rows(r), cols(c), a(static_cast<std::size_t>(r) * c, 0) {}
+    long long& at(int i, int j) { return a[static_cast<std::size_t>(i) * cols + j]; }
+    long long at(int i, int j) const { return a[static_cast<std::size_t>(i) * cols + j]; }
+    bool operator==(const Matrix& o) const {
+        return rows == o.rows && cols == o.cols && a == o.a;
+    }
+};
+
+// Classical Theta(n^3). Returns a 0x0 matrix if the sizes do not match.
+// If `mults` is given, the number of scalar multiplications is added to it.
+inline Matrix matMulClassical(const Matrix& A, const Matrix& B, long long* mults = nullptr) {
+    if (A.cols != B.rows) return Matrix(0, 0);
+    Matrix C(A.rows, B.cols);
+    for (int i = 0; i < A.rows; ++i)
+        for (int k = 0; k < A.cols; ++k) {
+            long long aik = A.at(i, k);
+            for (int j = 0; j < B.cols; ++j) C.at(i, j) += aik * B.at(k, j);
+        }
+    if (mults) *mults += static_cast<long long>(A.rows) * A.cols * B.cols;
+    return C;
+}
+
+namespace detail {
+
+inline Matrix matAdd(const Matrix& A, const Matrix& B) {
+    Matrix C(A.rows, A.cols);
+    for (std::size_t i = 0; i < A.a.size(); ++i) C.a[i] = A.a[i] + B.a[i];
+    return C;
+}
+
+inline Matrix matSub(const Matrix& A, const Matrix& B) {
+    Matrix C(A.rows, A.cols);
+    for (std::size_t i = 0; i < A.a.size(); ++i) C.a[i] = A.a[i] - B.a[i];
+    return C;
+}
+
+// h x h block of A whose top-left corner is (r0, c0)
+inline Matrix getBlock(const Matrix& A, int r0, int c0, int h) {
+    Matrix R(h, h);
+    for (int i = 0; i < h; ++i)
+        for (int j = 0; j < h; ++j) R.at(i, j) = A.at(r0 + i, c0 + j);
+    return R;
+}
+
+inline void setBlock(Matrix& C, const Matrix& S, int r0, int c0) {
+    for (int i = 0; i < S.rows; ++i)
+        for (int j = 0; j < S.cols; ++j) C.at(r0 + i, c0 + j) = S.at(i, j);
+}
+
+// A and B are n x n with n a power of 2.  T(n) = 7T(n/2) + Theta(n^2)
+inline Matrix strassenRec(const Matrix& A, const Matrix& B, int cutoff, long long* mults) {
+    int n = A.rows;
+    if (n <= cutoff) return matMulClassical(A, B, mults);
+    int h = n / 2;
+    Matrix A11 = getBlock(A, 0, 0, h), A12 = getBlock(A, 0, h, h);
+    Matrix A21 = getBlock(A, h, 0, h), A22 = getBlock(A, h, h, h);
+    Matrix B11 = getBlock(B, 0, 0, h), B12 = getBlock(B, 0, h, h);
+    Matrix B21 = getBlock(B, h, 0, h), B22 = getBlock(B, h, h, h);
+
+    // the 7 products
+    Matrix M1 = strassenRec(matAdd(A11, A22), matAdd(B11, B22), cutoff, mults);
+    Matrix M2 = strassenRec(matAdd(A21, A22), B11, cutoff, mults);
+    Matrix M3 = strassenRec(A11, matSub(B12, B22), cutoff, mults);
+    Matrix M4 = strassenRec(A22, matSub(B21, B11), cutoff, mults);
+    Matrix M5 = strassenRec(matAdd(A11, A12), B22, cutoff, mults);
+    Matrix M6 = strassenRec(matSub(A21, A11), matAdd(B11, B12), cutoff, mults);
+    Matrix M7 = strassenRec(matSub(A12, A22), matAdd(B21, B22), cutoff, mults);
+
+    Matrix C(n, n);
+    setBlock(C, matAdd(matSub(matAdd(M1, M4), M5), M7), 0, 0);   // C11 = M1+M4-M5+M7
+    setBlock(C, matAdd(M3, M5), 0, h);                           // C12 = M3+M5
+    setBlock(C, matAdd(M2, M4), h, 0);                           // C21 = M2+M4
+    setBlock(C, matAdd(matSub(matAdd(M1, M3), M2), M6), h, h);   // C22 = M1-M2+M3+M6
+    return C;
+}
+
+} // namespace detail
+
+// Strassen for any sizes: pads to a power of 2, multiplies, crops.
+// Blocks of size <= cutoff are multiplied the classical way.
+inline Matrix matMulStrassen(const Matrix& A, const Matrix& B, int cutoff = 1,
+                             long long* mults = nullptr) {
+    if (A.cols != B.rows) return Matrix(0, 0);
+    if (A.rows == 0 || A.cols == 0 || B.cols == 0) return Matrix(A.rows, B.cols);
+    if (cutoff < 1) cutoff = 1;
+    int m = std::max(A.rows, std::max(A.cols, B.cols));
+    int p = 1;
+    while (p < m) p *= 2;
+
+    Matrix PA(p, p), PB(p, p);
+    for (int i = 0; i < A.rows; ++i)
+        for (int j = 0; j < A.cols; ++j) PA.at(i, j) = A.at(i, j);
+    for (int i = 0; i < B.rows; ++i)
+        for (int j = 0; j < B.cols; ++j) PB.at(i, j) = B.at(i, j);
+
+    Matrix PC = detail::strassenRec(PA, PB, cutoff, mults);
+
+    Matrix C(A.rows, B.cols);
+    for (int i = 0; i < A.rows; ++i)
+        for (int j = 0; j < B.cols; ++j) C.at(i, j) = PC.at(i, j);
+    return C;
+}
