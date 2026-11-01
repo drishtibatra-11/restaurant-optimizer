@@ -85,3 +85,4 @@ inline KnapResult knapsackGreedy(const std::vector<KnapItem>& it, int cap) {
     mergeSort(res.chosen, [](std::size_t a, std::size_t b) { return a < b; });
     return res;
 }
+#include "dp_more.hpp"
